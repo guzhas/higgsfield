@@ -38,7 +38,7 @@ Observed 2026-10-08: OpenRouter Seedance rejected inline audio with HTTP 400,
 generation job or video was created. Local encoding tests are not provider
 acceptance. Do not repeat this incompatible request or ask for a media tunnel.
 
-Exception for the current meditation video: on 2026-10-08 the owner offered their existing Higgsfield storage key if necessary. Once supplied, Director input `referenceTransport: "higgsfield"` may upload only the selected image and finished dialogue copies for OpenRouter reference access. Keep original assets and outputs local. This is per order; do not change the project default or create tunnels, and do not request a BytePlus registration. Credentials alone do not select external storage for other orders.
+Current meditation order, updated 2026-10-08: the owner subsequently selected OpenRouter Seedance 2.5 and explicitly rejected Higgsfield use. The earlier Higgsfield reference-publication exception is withdrawn. Do not upload new reference copies, create public media URLs or request another provider registration. Keep historical receipts intact. The owner later allowed any workable local implementation; a local montage or local talking-portrait output must be identified as its actual workflow, never as a successful Seedance generation.
 
 The owner explicitly requested a Git-ignored `.env` containing the authorized
 provider keys. Keep keys there without echoing them or reading the file into
