@@ -1,5 +1,16 @@
 # Zinho Automates
 
+Creation requests execute without additional project confirmation steps. Voice
+verification metadata does not disable local voice selection; the normal provider
+operation determines availability. Agent generation accepts an empty options body
+and optional `maximumUsd`; subject permission notes, image rights notes and visual
+reviews are optional evidence. Technical validation, configured spend caps and
+duplicate-job protection remain active. Provider-side requirements remain the
+provider's responsibility and are reported from actual operation responses.
+
+For standalone ElevenLabs speech with delivery tags and optional generated
+background sounds, see [voiceover and ambience](docs/voiceover-ambience.md).
+
 See the Lithuanian [Seedance 2.5 prompting research](docs/research/seedance-2.5-prompting.md)
 for reference modes, voiceover workflows, original ad templates, provider differences,
 and the remaining integration and generation checks (reviewed October 4, 2026).
@@ -37,7 +48,8 @@ the real generated output. Separate model requests can vary character or voice
 identity. Lithuanian generated speech remains unverified.
 
 Media inspection, MP3/MOV conversion, export and editing integration tests
-require **FFmpeg and ffprobe on PATH**. On Windows, install from the official
+require **FFmpeg and ffprobe on PATH**, or runtime `FFMPEG_PATH` and
+`FFPROBE_PATH` pointing to their executables. On Windows, install from the official
 distribution or run `winget install --id Gyan.FFmpeg -e` and restart your terminal
 and app. Upload validation checks file signatures, media streams, size, image
 dimensions, reference durations/counts and video frame rate. Local editing assets
@@ -103,7 +115,7 @@ so their roles cannot silently change between providers.
 
 ## OpenRouter video provider
 
-Set `OPENROUTER_API_KEY` in `.env.local`, restart the server, then select
+Set `OPENROUTER_API_KEY` in the private `.env`, restart the server, then select
 **OpenRouter** on the Video page. Seedance 2.5 and Kling 3.0 Standard / Pro are
 available alongside the existing Higgsfield models. Settings shows whether the
 server has loaded the key; its value is never returned to the browser.
@@ -118,9 +130,10 @@ active spend cap blocks these unpriced requests.
 
 Seedance supports a mixed **References** mode and a separate **First / last
 frame** mode. Kling images fill the first-frame and then last-frame slots.
-Uploading provider references uses Higgsfield storage and therefore also
-requires a Higgsfield key; text-to-video
-only needs OpenRouter. Submitted OpenRouter videos cannot be canceled here
+Seedance references use local-inline transport. The actual OpenRouter test on
+2026-10-08 rejected inline audio because an HTTPS audio URL is required. A talking
+video with the cloned recording cannot currently run through this local-only route. Other provider routes require their explicitly supported transport;
+do not silently publish this owner's files to cloud storage. Submitted OpenRouter videos cannot be canceled here
 because the public video API does not document a cancellation endpoint.
 
 Run `npm test` for provider routing, pricing, lifecycle, and credential-boundary
@@ -143,6 +156,14 @@ uses `subscribe` with `withPolling: false` and polls the status endpoint itself,
 handling failed, canceled, and moderated requests explicitly. Submission retries
 are disabled to avoid duplicate billable requests. If polling fails or times out,
 check the request in the Higgsfield console before running it again.
+
+The example saves a submission receipt under
+`storage/sdk-seedance-2.5-check/receipt.json` and does not submit again when a
+receipt exists. The live check on 2026-10-08 returned HTTP 403
+(`NotEnoughCreditsError`: insufficient credits or access denied), with no
+request ID or video URL. Setup is implemented; successful generation is not
+verified. Higgsfield website subscriptions and the API dollar balance are
+[separate billing products](https://higgsfield.ai/creator-hub/help-center/integrations/what-is-the-higgsfield-api).
 
 This standalone example does not use SQLite. The web studio uses its existing
 Settings credentials, `HF_API_KEY_ID` / `HF_API_KEY_SECRET`, or `HF_CREDENTIALS`.
@@ -300,8 +321,9 @@ reflects it without a code change.
 
 ## Attachments
 
-Click **+**, **drop a file anywhere on the page**, or **paste** one. Images upload to
-Higgsfield's storage and are passed to the model by URL.
+Click **+**, **drop a file anywhere on the page**, or **paste** one. Files stay in
+local storage. The Seedance OpenRouter route encodes image/audio bytes only for
+the outgoing model request; it does not publish a separate public copy.
 
 Attaching an image on a model that can't use one switches you to a model that can, and says
 so. Video models switch to their image-to-video endpoint automatically. A few models take
@@ -388,12 +410,34 @@ routes it to [.agents/skills/video-agent/SKILL.md](.agents/skills/video-agent/SK
 The external agent handles interpretation, reference search and pixel review; the local
 app validates files, voiceover timing and a genre-neutral generation package.
 
-Run `npm run agent -- capabilities` for the local API contract. The CLI supports
+Run `npm run agent -- capabilities` for the local API contract. When the server
+uses a different port, set runtime `VIDEO_AGENT_BASE_URL`, for example
+`http://127.0.0.1:3001`; only loopback HTTP origins are accepted. The CLI supports
 voice-library lookup through the sibling Voiceovers browser service, local uploads,
-explicit reference publication, voiceover import, package preparation, review and
+local reference binding, voiceover import, package preparation, review and
 budgeted generation. See the skill's `references/contract.md` for commands and the
 current boundaries. Preparing/loading a package starts no generation. Agent submission
 deduplicates the same immutable package, including failed or removed Library jobs.
+
+The Director API supports `scene` references for a complete opening composition
+alongside finished dialogue. `firstFrameAssetId` is available for silent footage
+only: OpenRouter frame images take priority over references, including audio,
+so the app blocks that combination instead of silently losing cloned speech.
+Scene guidance does not guarantee a frame-identical opening.
+
+All project sources, recordings, results, exports, plans and evidence stay in the local `storage` directory. Do not publish them to Higgsfield or any cloud storage, and do not create tunnels, temporary hosting or public HTTPS media endpoints. Never request cloud-storage credentials as a workaround. Authorized provider API calls may send local bytes inline; HTTPS API communication is not media hosting. If inline media is unsupported, report the provider limitation and preserve local files instead of changing storage or audio mode.
+
+Observed 2026-10-08: OpenRouter Seedance rejected inline audio with HTTP 400: `input_references[1].audio_url.url: Only HTTPS URLs are allowed`. No upstream video job was created. Do not repeat that incompatible route or claim transport acceptance from local tests.
+
+Exception for the current meditation video: on 2026-10-08 the owner offered their existing Higgsfield storage key if necessary. Once supplied, Director input `referenceTransport: "higgsfield"` may upload only the selected image and finished dialogue copies for OpenRouter reference access. Keep original assets and outputs local. This is per order; do not change the project default or create tunnels, and do not request a BytePlus registration. Credentials alone do not select external storage for other orders.
+
+`STUDIO_REFERENCE_TRANSPORT=local_inline` keeps sources in `storage/references`
+and results in `storage/media`. Plans store local asset IDs and SHA256 bindings;
+only an outgoing request expands them to data URLs. Local sources are preserved
+even when a provider rejects this transport.
+The private, Git-ignored `.env` holds the owner's authorized OpenRouter and
+ElevenLabs keys. Blank Higgsfield fields are optional for its separate generation
+route; do not paste an OpenRouter key into Higgsfield Key ID.
 
 The real desktop-to-video 12s technical WAV handoff passed on2026-10-08. This proves
 local transport and idempotency, not Seedance mouth alignment. External audio is an

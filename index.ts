@@ -8,6 +8,14 @@ import {
   higgsfield,
 } from "@higgsfield/client/v2";
 import { fileURLToPath } from "node:url";
+import fs from "node:fs";
+import path from "node:path";
+
+const evidenceDirectory=path.join(process.cwd(),"storage","sdk-seedance-2.5-check");
+const receiptPath=path.join(evidenceDirectory,"receipt.json");
+function saveReceipt(result:{status:string;request_id?:string;video?:{url:string}}){
+  fs.writeFileSync(receiptPath,JSON.stringify({checkedAt:new Date().toISOString(),model:"bytedance/seedance-2.5/text-to-video",input:{prompt:"A cinematic scene at sunset",duration:5,resolution:"720p",aspect_ratio:"16:9"},status:result.status,requestId:result.request_id??null,videoUrl:result.video?.url??null},null,2));
+}
 
 async function main(): Promise<void> {
   // Server-only CLI. Never print the environment, config, or raw SDK errors.
@@ -20,6 +28,14 @@ async function main(): Promise<void> {
   }
 
   config({ credentials, maxRetries: 0, timeout: 60_000, maxPollTime: 45 * 60_000 });
+  fs.mkdirSync(evidenceDirectory,{recursive:true});
+  if(fs.existsSync(receiptPath)){
+    const previous=JSON.parse(fs.readFileSync(receiptPath,"utf8"));
+    if(previous.status==="completed"&&previous.videoUrl){console.log(previous.videoUrl);return;}
+    console.error("This example was already attempted. Check its saved request ID before any new billable submission.");
+    process.exitCode=1;return;
+  }
+  fs.writeFileSync(receiptPath,JSON.stringify({status:"submitting",startedAt:new Date().toISOString(),automaticRetry:false}),{flag:"wx"});
   console.error("Submitting one billable Seedance 2.5 generation; waiting for completion...");
 
   // The current SDK's built-in poller does not stop on canceled/cancelled.
@@ -33,6 +49,7 @@ async function main(): Promise<void> {
     },
     withPolling: false,
   });
+  saveReceipt(result);
   const deadline = Date.now() + 45 * 60_000;
   let delay = 2000;
   for (;;) {
@@ -68,10 +85,15 @@ async function main(): Promise<void> {
     if (response.status === 429 || response.status >= 500) continue;
     if (!response.ok) throw new APIError("Status request failed", response.status);
     result = await response.json();
+    saveReceipt(result);
   }
 }
 
 main().catch((error: unknown) => {
+  if(fs.existsSync(receiptPath)){
+    const previous=JSON.parse(fs.readFileSync(receiptPath,"utf8"));
+    fs.writeFileSync(receiptPath,JSON.stringify({...previous,status:error instanceof NotEnoughCreditsError||error instanceof AuthenticationError?"rejected":"outcome_unknown",httpStatus:error instanceof NotEnoughCreditsError?403:error instanceof AuthenticationError?401:error instanceof APIError?error.statusCode:null,automaticRetry:false},null,2));
+  }
   // Raw HTTP errors can contain Authorization headers; only emit fixed messages.
   if (error instanceof AuthenticationError) {
     console.error("Authentication failed. Check HF_CREDENTIALS locally.");

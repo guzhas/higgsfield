@@ -4,7 +4,8 @@ import { promisify } from 'node:util';
 const execute = promisify(execFile);
 export async function runMediaTool(tool: 'ffmpeg' | 'ffprobe', args: string[], cwd?: string) {
   try {
-    return await execute(tool, args, { cwd, timeout: 180_000, maxBuffer: 2 * 1024 * 1024, windowsHide: true });
+    const executable = process.env[tool === 'ffmpeg' ? 'FFMPEG_PATH' : 'FFPROBE_PATH']?.trim() || tool;
+    return await execute(executable, args, { cwd, timeout: 180_000, maxBuffer: 2 * 1024 * 1024, windowsHide: true });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('Install FFmpeg (including ffprobe) and restart the server to inspect and export media.');
     throw new Error('The media file could not be processed. Check its format and try again.');

@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "voiceover": "node scripts/voiceover.mjs",
+    "voiceover:outdoor": "node scripts/voiceover-outdoor.mjs",
+    "test:voiceover": "node --test scripts/voiceover.test.mjs",
     "agent": "node scripts/video-agent.mjs",
     "check:agent": "tsx scripts/check-agent-workflow.ts",
     "prompts:sync": "node scripts/sync-prompts.mjs",

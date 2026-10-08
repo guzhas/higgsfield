@@ -1,8 +1,12 @@
 # Seedance 2.5 speech and lip-sync playbook
 
-Checked 2026-10-08. This guide distinguishes published capabilities, this project's implementation and production recommendations. No billable research generation was performed. The machine-readable evidence and request example are in `seedance-2.5-audio-lipsync-2026-10-08.json`.
+Checked 2026-10-08. This guide distinguishes published capabilities, this project's implementation and production recommendations. No billable research generation was performed. The actual later OpenRouter attempt rejected local-inline audio with HTTP 400; no video was created. All files stay local; cloud storage, tunnels and public media endpoints are forbidden. The machine-readable evidence and request example are in `seedance-2.5-audio-lipsync-2026-10-08.json`.
 
 ## What is established
+
+For environmental sound, microphone perspective and room-like source audio,
+also apply the [scene-acoustics research](seedance-2.5-scene-acoustics-2026-10-08.md).
+Adding ambience does not establish outdoor voice acoustics.
 
 The [official model tutorial](https://docs.byteplus.com/es/docs/modelark/seedance-2-5) lists native speech in Chinese, English, Spanish, Indonesian, Malay, Thai, Arabic, Portuguese, Vietnamese, Japanese and Korean. It describes audio-only reference input and videos up to 30 seconds. This is not an all-language guarantee. Lithuanian is not listed; do not describe it as verified or categorically impossible.
 
@@ -35,7 +39,7 @@ These are production recommendations, not additional documented model controls:
 5. Plan the picture around those measured times. A continuous short monologue can use one complete generation. Split longer scripts at natural pauses; do not cut a word across requests. Reuse identity, wardrobe, scene and lighting descriptions across clips, and expect possible drift. Five-second clips are not inherently better than one 20-second request.
 6. Assign compatible character/location/product images clear roles. Inspect externally sourced reference pixels; photos supplied directly by the user are exempt from automatic analysis under AGENTS.md, unless the user explicitly requests it. Never invent a review for them. A character photo describes appearance, a location photo describes geometry, and the WAV supplies the spoken performance. Do not flood the request with contradictory views. A face reference is optional for a newly invented presenter; provider portrait rules still apply.
 7. For a speaking shot, keep the mouth readable: medium or close framing, modest movement, minimal occlusion and enough time for articulation. Choose elaborate camera moves only when they support the requested scene. For multiple speakers, explicitly associate each line/time range with a visible character and keep the non-speaking characters silent.
-8. Request `ceil(actualSeconds)` from the model. Preserve fractional edit duration and trim the ending hold rather than stretching the WAV. For reference mode the published audio copy must have the same bytes and duration as the approved local recording.
+8. Request `ceil(actualSeconds)` from the model. Preserve fractional edit duration and trim the ending hold rather than stretching the WAV. For reference mode the inline audio bytes must have the same bytes and duration as the approved local recording.
 
 ## Uploaded-dialogue checklist (implementation checked 2026-10-08)
 
@@ -62,7 +66,7 @@ These are production recommendations, not additional documented model controls:
    no added second layer, music or competing voices. Repeat this audio policy near
    the start and end, as the official guide recommends for unwanted music. An
    explicit `audio.soundscape` remains authoritative.
-6. Keep the published WAV byte-identical to the import, use mixed references and
+6. Keep the local bound WAV byte-identical to the import, use mixed references and
    `generate_audio:true`, match edit time to PCM frames and round only model
    duration upward. Do not invent `lip_sync`, forced-alignment, `draft`, native
    BytePlus roles or adaptive-duration fields in the OpenRouter payload.
@@ -122,7 +126,7 @@ OpenRouter input example:
 }
 ```
 
-Use provider-accessible media files, not website pages or localhost paths. Keep URLs valid while processing. Direct BytePlus uses `content` and `role:reference_audio`; Higgsfield has its own reference-to-video schema. Do not copy either payload unchanged into OpenRouter. A model seed does not guarantee cross-provider reproducibility or exact speaker identity.
+The HTTPS example above describes the provider schema, not an allowed project hosting workflow. This project sends local bytes inline only. OpenRouter currently rejects inline audio; do not publish media or create a tunnel to work around it. Direct BytePlus uses `content` and `role:reference_audio`; Higgsfield has its own reference-to-video schema. Do not copy either payload unchanged into OpenRouter. A model seed does not guarantee cross-provider reproducibility or exact speaker identity.
 
 ## Acceptance and failure handling
 

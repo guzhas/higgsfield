@@ -1,4 +1,5 @@
 export type ReferenceKind = 'image' | 'video' | 'audio';
+import { isLocalAssetUrl, localAssetUrl } from './local-reference-id';
 export type ReferenceMode = 'references' | 'frames';
 export interface VideoReference {
   url: string;
@@ -24,9 +25,13 @@ export function validateReferences(refs: VideoReference[], mode: ReferenceMode):
   if (!Array.isArray(refs) || refs.length > 50) throw new Error('Use at most 50 reference assets.');
   for (const r of refs) {
     if (!r || !['image', 'video', 'audio'].includes(r.kind) || typeof r.url !== 'string') throw new Error('Invalid reference asset.');
-    let url: URL;
-    try { url = new URL(r.url); } catch { throw new Error('References need a public HTTPS file URL.'); }
-    if (url.protocol !== 'https:' || url.username || url.password) throw new Error('References need a public HTTPS file URL.');
+    if (isLocalAssetUrl(r.url)) {
+      if (!r.assetId || r.url !== localAssetUrl(r.assetId)) throw new Error('Local references must match an uploaded asset ID.');
+    } else {
+      let url: URL;
+      try { url = new URL(r.url); } catch { throw new Error('References need an uploaded local asset or a public HTTPS file URL.'); }
+      if (url.protocol !== 'https:' || url.username || url.password) throw new Error('References need an uploaded local asset or a public HTTPS file URL.');
+    }
     if (r.purpose && (typeof r.purpose !== 'string' || r.purpose.length > 300)) throw new Error('Keep each reference role under 300 characters.');
     if (r.kind !== 'image' && (!Number.isFinite(r.duration) || r.duration! < 2 || r.duration! > 30)) throw new Error('Audio and video references must be 2–30 seconds long. Upload the file to check its duration.');
     if (r.kind === 'video' && r.frameRate !== undefined && (!Number.isFinite(r.frameRate) || r.frameRate < 24 || r.frameRate > 60)) throw new Error('Video references need a frame rate between 24 and 60 fps.');

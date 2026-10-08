@@ -8,6 +8,7 @@ import { newAdPlan, generationDuration } from './ad-plan';
 import { parseGenerationRequest } from './payload';
 import type { AgentBrief, AgentPackage } from './agent-contract';
 import { speechLanguageEvidence, referenceSpeechDirection, REFERENCE_AUDIO_DESIGN } from './seedance-speech';
+import { parseSceneAcoustics, sceneAudioDirection, sceneAudioWarnings } from './scene-audio';
 
 export const AGENT_DIR = path.join(process.cwd(), 'storage', 'agent-plans');
 export class AgentError extends Error { constructor(message: string, public status = 400) { super(message); } }
@@ -44,7 +45,12 @@ export function parseAgentBrief(value: unknown): AgentBrief {
   if (r.schemaVersion !== 1) fail('Use schemaVersion 1.');
   const f = obj(r.format, ['aspectRatio','resolution'], 'format'), s = obj(r.subject, ['kind','description','permission'], 'subject');
   const l = obj(r.location, ['name','viewpoint','minimumReferences'], 'location'), d = obj(r.dialogue, ['text','language','delivery'], 'dialogue');
-  const a = obj(r.audio, ['mode','voiceoverImportId','referenceAssetId','soundscape'], 'audio');
+  const a = obj(r.audio, ['mode','voiceoverImportId','referenceAssetId','soundscape','acoustics'], 'audio');
+  let acoustics: AgentBrief['audio']['acoustics'];
+  if (a.acoustics !== undefined) {
+    try { acoustics = parseSceneAcoustics(a.acoustics); } catch (e) { fail((e as Error).message); }
+    if (a.mode === 'native' && acoustics.ambienceMode === 'preserve_reference') fail('Native audio has no finished reference ambience to preserve. Choose scene generation or dialogue only.');
+  }
   if (!Array.isArray(r.scenes) || !r.scenes.length || r.scenes.length > 10) fail('Use 1–10 scenes.');
   const scenes = r.scenes.map(v => { const x = obj(v, ['duration','action','camera','caption'], 'scene');
     if (typeof x.duration !== 'number' || !Number.isFinite(x.duration) || x.duration < 1 || x.duration > 30) fail('Scene lengths must be 1–30s.');
@@ -53,20 +59,24 @@ export function parseAgentBrief(value: unknown): AgentBrief {
   if (!Number.isInteger(l.minimumReferences) || (l.minimumReferences as number) < 0 || (l.minimumReferences as number) > 30) fail('minimumReferences must be 0–30.');
   if (!Array.isArray(r.references) || r.references.length > 30) fail('Use at most 30 image references.');
   const references = r.references.map(v => { const x = obj(v, ['assetId','sourceUrl','provenance','rights','role','usage','review'], 'reference');
-    const review = obj(x.review, ['sha256','method','reviewer','locationMatch','viewpointMatch','usable','observations'], 'vision review');
-    if (review.method !== 'vision' || !/^[a-f0-9]{64}$/.test(String(review.sha256))) fail('Record a vision review bound to the actual image SHA256.');
-    for (const k of ['locationMatch','viewpointMatch','usable']) if (typeof review[k] !== 'boolean') fail('Invalid vision assessment.');
+    let review: AgentBrief['references'][number]['review'];
+    if (x.review !== undefined) {
+      const assessment = obj(x.review, ['sha256','method','reviewer','locationMatch','viewpointMatch','usable','observations'], 'vision review');
+      if (assessment.method !== 'vision' || !/^[a-f0-9]{64}$/.test(String(assessment.sha256))) fail('A supplied vision review must include the actual image SHA256.');
+      for (const k of ['locationMatch','viewpointMatch','usable']) if (typeof assessment[k] !== 'boolean') fail('Invalid vision assessment.');
+      review = { sha256: assessment.sha256 as string, method: 'vision', reviewer: str(assessment.reviewer, 'reviewer', 200),
+        locationMatch: assessment.locationMatch as boolean, viewpointMatch: assessment.viewpointMatch as boolean, usable: assessment.usable as boolean,
+        observations: str(assessment.observations, 'observations', 1500) };
+    }
     const id = str(x.assetId, 'asset ID', 36); if (!/^[0-9a-f-]{36}$/i.test(id)) fail('Invalid asset ID.');
     const sourceUrl = x.sourceUrl === undefined ? undefined : https(x.sourceUrl);
     const provenance = x.provenance === undefined ? undefined : str(x.provenance, 'provenance', 1000);
-    if (!sourceUrl && !provenance) fail('Record the source page or truthful provenance of a user-provided/generated reference.');
-    return { assetId: id, ...(sourceUrl ? { sourceUrl } : {}), ...(provenance ? { provenance } : {}), rights: str(x.rights, 'reference rights', 500), role: str(x.role, 'reference role', 300), usage: choice(x.usage, ['location','subject','product','style'], 'reference usage'),
-      review: { sha256: review.sha256 as string, method: 'vision' as const, reviewer: str(review.reviewer, 'reviewer', 200), locationMatch: review.locationMatch as boolean,
-        viewpointMatch: review.viewpointMatch as boolean, usable: review.usable as boolean, observations: str(review.observations, 'observations', 1500) } }; });
+    const rights = x.rights === undefined ? undefined : str(x.rights, 'reference rights', 500);
+    return { assetId: id, ...(sourceUrl ? { sourceUrl } : {}), ...(provenance ? { provenance } : {}), ...(rights ? { rights } : {}),
+      role: str(x.role, 'reference role', 300), usage: choice(x.usage, ['location','subject','product','style'], 'reference usage'), ...(review ? { review } : {}) }; });
   if (new Set(references.map(x => x.assetId)).size !== references.length) fail('Choose distinct reference assets.');
   const kind = choice(s.kind, ['fictional','authorized'], 'subject kind');
   const permission = s.permission === undefined ? undefined : str(s.permission, 'permission', 1000);
-  if (kind === 'authorized' && !permission) fail('Record the subject and voice permission basis. A public recording is not consent.');
   const importId = a.voiceoverImportId === undefined ? undefined : str(a.voiceoverImportId, 'voiceover import ID', 64);
   if (importId && !/^[a-f0-9]{64}$/.test(importId)) fail('Invalid voiceover import ID.');
   const referenceAssetId = a.referenceAssetId === undefined ? undefined : str(a.referenceAssetId, 'published audio asset ID', 36);
@@ -76,15 +86,16 @@ export function parseAgentBrief(value: unknown): AgentBrief {
     subject: { kind, description: str(s.description, 'subject'), ...(permission ? { permission } : {}) },
     location: { name: str(l.name, 'location', 500), viewpoint: str(l.viewpoint, 'viewpoint', 1000), minimumReferences: l.minimumReferences as number },
     dialogue: { text: str(d.text, 'dialogue', 12000, true), language: str(d.language, 'language', 80), delivery: str(d.delivery, 'delivery', 1000) },
-    audio: { mode: choice(a.mode, ['native','reference','original','silent'], 'audio mode'), ...(importId ? { voiceoverImportId: importId } : {}), ...(referenceAssetId ? { referenceAssetId } : {}), ...(a.soundscape === undefined ? {} : { soundscape: str(a.soundscape, 'soundscape', 1000) }) },
+    audio: { mode: choice(a.mode, ['native','reference','original','silent'], 'audio mode'), ...(acoustics ? { acoustics } : {}), ...(importId ? { voiceoverImportId: importId } : {}), ...(referenceAssetId ? { referenceAssetId } : {}), ...(a.soundscape === undefined ? {} : { soundscape: str(a.soundscape, 'soundscape', 1000) }) },
     ...(r.finishing === undefined ? {} : { finishing: str(r.finishing, 'finishing', 1000) }), scenes, references };
 }
 
-// Reviews are supplied by an external vision-capable agent. Metadata cannot prove visual suitability or permission.
+// Optional reviews are evidence, not approvals. Provider APIs enforce their own requirements.
 export function compileAgentBrief(brief: AgentBrief, origin = 'http://127.0.0.1:3000'): AgentPackage {
   const id = createHash('sha256').update(JSON.stringify(brief)).digest('hex');
   const blockers: string[] = [], refs: VideoReference[] = [];
   const warnings: string[] = [];
+  if (brief.audio.acoustics && ['native','reference'].includes(brief.audio.mode)) warnings.push(...sceneAudioWarnings(brief.audio.acoustics,brief.audio.mode==='reference'));
   if (brief.audio.mode === 'reference') warnings.push('Reference audio is voice/timing guidance; original audio preservation and exact lip sync are not live-verified.');
   if (['silent','original'].includes(brief.audio.mode) && brief.audio.soundscape) warnings.push('This workflow uses silent model visuals; any extra sound design requires an explicit local editing stage. It is not sent as generated audio.');
   if (brief.dialogue.text && ['native','reference'].includes(brief.audio.mode) && !speechLanguageEvidence(brief.dialogue.language).documented) warnings.push(`${brief.dialogue.language} is not in the documented 11-language native-speech list. Treat this language as an unverified attempt and check pronunciation, transcript and lip sync.`);
@@ -93,23 +104,24 @@ export function compileAgentBrief(brief: AgentBrief, origin = 'http://127.0.0.1:
     try {
       const asset = readAsset(r.assetId), hash = createHash('sha256').update(fs.readFileSync(assetPath(asset))).digest('hex');
       if (asset.kind !== 'image') throw new Error('Use an image for a location reference.');
-      if (hash !== r.review.sha256) throw new Error('Image changed after its vision review.');
+      if (r.review && hash !== r.review.sha256) throw new Error('Image changed after its vision review.');
       if (hashes.has(hash)) throw new Error('Duplicate image content does not count as another reference.'); hashes.add(hash);
-      if (!r.review.usable || (r.usage === 'location' && !r.review.locationMatch)) throw new Error('Vision review rejected this reference.');
+      if (r.review && (!r.review.usable || (r.usage === 'location' && !r.review.locationMatch))) warnings.push(`${r.assetId}: the recorded review flags a reference mismatch.`);
       if (r.usage === 'location') usableLocation++;
-      if (!asset.url) throw new Error('Publish the approved reference explicitly before model use.');
+      if (!asset.url) throw new Error('Upload the reference for model use.');
       refs.push({ ...asset, purpose: r.role });
     } catch (e) { blockers.push(`${r.assetId}: ${e instanceof Error ? e.message : 'Reference unavailable.'}`); }
   }
-  if (usableLocation < brief.location.minimumReferences) blockers.push(`Find and visually review at least ${brief.location.minimumReferences} distinct images of ${brief.location.name}.`);
-  if (brief.location.minimumReferences > 0 && !brief.references.some(r => r.usage === 'location' && r.review.usable && r.review.locationMatch && r.review.viewpointMatch)) blockers.push('Include a visually approved reference for the requested camera viewpoint, not only exterior location views.');
+  if (usableLocation < brief.location.minimumReferences) blockers.push(`Include at least ${brief.location.minimumReferences} distinct images assigned to ${brief.location.name}.`);
+  if (brief.location.minimumReferences > 0 && !brief.references.some(r => r.usage === 'location' && r.review?.usable && r.review.locationMatch && r.review.viewpointMatch)) warnings.push('The requested camera viewpoint has no recorded visual review.');
   const plan = newAdPlan();
+  if(brief.audio.acoustics) plan.acoustics=brief.audio.acoustics;
   Object.assign(plan, { product: `${brief.subject.description}\nLocation: ${brief.location.name}. ${brief.location.viewpoint}`, audience: brief.request,
     aspectRatio: brief.format.aspectRatio, resolution: brief.format.resolution, language: brief.dialogue.language,
     audioMode: brief.audio.mode === 'native' ? 'generated' : brief.audio.mode, references: refs,
     scenes: brief.scenes.map((s, i) => ({ id: `scene-${i + 1}`, duration: s.duration, visual: s.action, camera: s.camera, narration: brief.scenes.length === 1 ? brief.dialogue.text : '', caption: s.caption ?? '', trimStart: 0 })) });
   if (brief.audio.mode === 'reference' || brief.audio.mode === 'original') {
-    if (!brief.audio.voiceoverImportId) blockers.push('A completed Voiceovers import is required. Check the voice library; request a permitted clean sample and speaker consent if enrollment is needed.');
+    if (!brief.audio.voiceoverImportId) blockers.push('A completed Voiceovers import is required for the requested audio workflow.');
     else try {
       const imported = readVoiceoverImport(brief.audio.voiceoverImportId, origin);
       if (imported.manifest.text !== brief.dialogue.text) blockers.push('The approved transcript must match the imported voiceover exactly. Transcribe a prepared recording first.');
@@ -129,11 +141,13 @@ export function compileAgentBrief(brief: AgentBrief, origin = 'http://127.0.0.1:
     } catch { blockers.push('The completed voiceover import is unavailable.'); }
   }
   if (brief.audio.mode === 'native' && !brief.dialogue.text && !brief.audio.soundscape) blockers.push('Supply exact spoken words or a non-speaking soundscape for native audio, or choose silent video.');
-  if (brief.audio.mode === 'reference' && !brief.dialogue.text) blockers.push('The v1 reference mode requires a verified dialogue transcript. Use Studio for music-only or non-speech audio references.');
+  if (brief.audio.mode === 'reference' && !brief.dialogue.text) blockers.push('The v1 reference mode requires a dialogue transcript. Use Studio for music-only or non-speech audio references.');
   try { validateReferences(refs, 'references'); } catch (e) { blockers.push((e as Error).message); }
   let t = 0; const shots = brief.scenes.map(s => { const start = t; t += s.duration; return `[${start}–${t}s] ${s.action} Camera: ${s.camera}`; });
   const audioLabel = refs.findIndex(r => r.kind === 'audio');
-  const audioDesign = brief.audio.soundscape ?? (brief.audio.mode === 'reference' ? REFERENCE_AUDIO_DESIGN : 'Natural room/scene tone; no music or additional voices. Keep dialogue clearly audible.');
+  const audioDesign = brief.audio.acoustics
+    ? sceneAudioDirection(brief.audio.acoustics, brief.audio.mode === 'reference') + (brief.audio.soundscape ? `\nADDITIONAL SOUND DIRECTION: ${brief.audio.soundscape}` : '\nNo unrequested music or additional voices.')
+    : brief.audio.soundscape ?? (brief.audio.mode === 'reference' ? REFERENCE_AUDIO_DESIGN : 'Natural scene tone appropriate to the visible location; no music or additional voices. Keep dialogue clearly audible.');
   const prompt = withReferenceRoles([
     `Create a ${generationDuration(plan)}-second ${brief.format.aspectRatio} video.`,
     `BRIEF: ${brief.request}`, `SUBJECT: ${brief.subject.description}`,
@@ -152,7 +166,7 @@ export function compileAgentBrief(brief: AgentBrief, origin = 'http://127.0.0.1:
   if (!blockers.length) try { parseGenerationRequest(request); } catch (e) { blockers.push((e as Error).message); }
   return { schemaVersion: 1, id, brief, status: blockers.length ? 'blocked' : 'ready', blockers, warnings, prompt, generationRequest: blockers.length ? null : request,
     adPlan: plan, compositionUrl: `${origin}/ads?agentPlan=${id}`, generationStarted: false,
-    capabilities: { referenceAudio: 'experimental', exactLipSync: false, vision: 'external-agent-attestation' } };
+    capabilities: { referenceAudio: 'experimental', exactLipSync: false, vision: 'optional-external-agent-review' } };
 }
 export function saveAgentBrief(brief: AgentBrief, origin: string) {
   const result = compileAgentBrief(brief, origin); fs.mkdirSync(AGENT_DIR, { recursive: true });

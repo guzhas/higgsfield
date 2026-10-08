@@ -36,6 +36,8 @@ export async function GET() {
 export async function POST(req: Request) {
   const body = await req.json();
 
+  if (typeof body.keyId === 'string' && /^sk-or-v1-/.test(body.keyId.trim())) return NextResponse.json({error:'This is an OpenRouter key. Put it in OPENROUTER_API_KEY in .env, not Higgsfield Key ID.'},{status:400});
+
   if (typeof body.keyId === "string") setSetting("hf_key_id", body.keyId.trim());
   // An empty secret means "leave the stored one alone", so the settings form can
   // be re-saved without retyping it.

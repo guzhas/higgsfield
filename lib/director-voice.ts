@@ -14,13 +14,16 @@ export function setElevenKey(key: string) {
 }
 export async function elevenVoices() {
   const key = elevenKey(); if (!key) return { configured: false, voices: [] };
-  const voices: { id: string; name: string; category: string; available: boolean }[] = []; let token = '';
+  const voices: { id: string; name: string; category: string; available: boolean; selectable: boolean; requiresVerification: boolean; isVerified: boolean }[] = []; let token = '';
   for (let page = 0; page < 10; page++) {
     const url = new URL('https://api.elevenlabs.io/v2/voices'); url.searchParams.set('page_size','100'); url.searchParams.set('voice_type','non-default'); if (token) url.searchParams.set('next_page_token', token);
     const res = await fetch(url, { headers: { 'xi-api-key': key }, signal: AbortSignal.timeout(20000), redirect: 'error' });
     if (!res.ok) throw new AgentError(`ElevenLabs balsų sąrašas nepasiekiamas (${res.status}). Raktui reikia „Voices: Read“.`, 401);
     const body = await res.json();
-    for (const v of body.voices ?? []) voices.push({ id: String(v.voice_id), name: String(v.name), category: String(v.category), available: !v.voice_verification?.requires_verification || v.voice_verification?.is_verified === true });
+    // Provider verification metadata is informational. The synthesis endpoint decides whether a voice can be used.
+    for (const v of body.voices ?? []) voices.push({ id: String(v.voice_id), name: String(v.name), category: String(v.category),
+      available: !v.voice_verification?.requires_verification || v.voice_verification?.is_verified === true, selectable: true,
+      requiresVerification: v.voice_verification?.requires_verification === true, isVerified: v.voice_verification?.is_verified === true });
     if (!body.has_more) return { configured: true, voices };
     if (!body.next_page_token || body.next_page_token === token) throw new AgentError('Nepavyko nuskaityti visų balsų puslapių.', 502);
     token = body.next_page_token;
@@ -31,15 +34,22 @@ export async function createDialogue(voiceId: string, text: string, language: st
   if (!/^[A-Za-z0-9_-]{5,100}$/.test(voiceId)) throw new AgentError('Pasirink klonuotą balsą.');
   if (!text || text.length > 450) throw new AgentError('Šiam trumpam video naudok iki 450 teksto simbolių.');
   const library = await elevenVoices();
-  if (!library.voices.some(v=>v.id === voiceId && v.available)) throw new AgentError('Pasirinktas balsas nėra prieinamas šioje ElevenLabs paskyroje.', 422);
+  if (!library.voices.some(v=>v.id === voiceId)) throw new AgentError('Pasirinkto balso nėra šioje ElevenLabs paskyroje.', 422);
   let res: Response;
   try {
     res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=pcm_24000`, {
       method: 'POST', headers: { 'xi-api-key': elevenKey(), 'Content-Type': 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(110000),
-      body: JSON.stringify({ text, model_id: 'eleven_v3', language_code: language, voice_settings: { stability: 0.5, similarity_boost: 0.75 } }),
+      // v3 has no Similarity/Speaker Boost control. Do not imply either fixes source acoustics.
+      body: JSON.stringify({ text, model_id: 'eleven_v3', language_code: language, voice_settings: { stability: 0.5 } }),
     });
   } catch { throw new AgentError('Įgarsinimo užklausos baigtis nežinoma. Automatiškai nekartojame; patikrink ElevenLabs istoriją.', 502); }
-  if (!res.ok) throw new AgentError(`ElevenLabs įgarsinimą atmetė (${res.status}). Patikrink TTS teises ir kreditus.`, 502);
+  if (!res.ok) {
+    let verificationRequired = false;
+    try { const body = await res.json(); verificationRequired = /verif/i.test(String(body?.detail?.status ?? '')); } catch {}
+    throw new AgentError(verificationRequired
+      ? `ElevenLabs įgarsinimo API reikalauja balso patvirtinimo (${res.status}). Tai tiekėjo atsakymas; projektas papildomo patvirtinimo nereikalauja.`
+      : `ElevenLabs įgarsinimą atmetė (${res.status}). Patikrink TTS teises ir kreditus.`, 502);
+  }
   const pcm = Buffer.from(await res.arrayBuffer());
   if (pcm.length < 5 * 48000 || pcm.length > 30 * 48000 || pcm.length % 2) throw new AgentError('Gautas įgarsinimas netelpa į 5–30 sek. video. Koreguok tekstą; garso automatiškai negreitinsime.', 422);
   const wav = Buffer.alloc(44 + pcm.length); wav.write('RIFF'); wav.writeUInt32LE(wav.length-8,4); wav.write('WAVEfmt ',8); wav.writeUInt32LE(16,16); wav.writeUInt16LE(1,20); wav.writeUInt16LE(1,22); wav.writeUInt32LE(24000,24); wav.writeUInt32LE(48000,28); wav.writeUInt16LE(2,32); wav.writeUInt16LE(16,34); wav.write('data',36); wav.writeUInt32LE(pcm.length,40); pcm.copy(wav,44);

@@ -4,12 +4,24 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { parseAgentBrief, compileAgentBrief, assertAgentRequest, AgentError } from './agent-plans';
-import { agentJobId, parseAgentAuthorization } from './agent-generation';
+import { agentJobId, parseAgentGenerationOptions } from './agent-generation';
 import { ASSET_DIR, saveAsset, readAsset, assetPath } from './reference-assets';
 import { importVoiceover } from './voiceover-import';
 import { referenceInputs, type VideoReference } from './video-references';
 import { speechLanguageEvidence } from './seedance-speech';
 const example = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'docs', 'agent-brief.example.json'), 'utf8'));
+
+test('native scene acoustics remain prompt guidance and transfer into editing without invented provider fields',()=>{
+  const acoustics={space:'open_air',microphone:'phone_camera',distanceMeters:2,referenceContent:'speech_only',ambienceMode:'generate_from_scene',referenceAcoustics:'unknown',soundscape:'Soft sea surf; no music.'};
+  const brief=parseAgentBrief({...example,location:{name:'Invented beach',viewpoint:'Phone held 2 m from speaker',minimumReferences:0},audio:{mode:'native',acoustics}});
+  const pkg=compileAgentBrief(brief);
+  assert.equal(pkg.status,'ready',pkg.blockers.join('; '));
+  assert.match(pkg.prompt,/Generate speech and environment together/);
+  assert.deepEqual(pkg.adPlan.acoustics,brief.audio.acoustics);
+  assert.deepEqual(Object.keys(pkg.generationRequest!.params as object).sort(),['aspect_ratio','duration','generate_audio','resolution']);
+  assert.throws(()=>parseAgentBrief({...example,audio:{mode:'native',acoustics:{...acoustics,referenceAcoustics:'roomy'}}}),/kambario aidas/);
+  assert.throws(()=>parseAgentBrief({...example,audio:{mode:'native',acoustics:{...acoustics,referenceContent:'mixed',ambienceMode:'preserve_reference'}}}),/no finished reference/);
+});
 
 test('agent packet identifies missing real location references; silent invented settings can be ready without a voice', () => {
   const brief = parseAgentBrief(example);
@@ -22,8 +34,9 @@ test('agent packet identifies missing real location references; silent invented 
   assert.equal((pkg.generationRequest?.params as Record<string,unknown>).generate_audio, false);
   assert.ok(!pkg.prompt.includes('product advertisement'));
 });
-test('agent packet rejects secret fields, unknown modes, missing authorization basis and unsupported durations', () => {
-  for (const invalid of [{ ...example, apiKey: 'dummy' }, { ...example, subject: { kind: 'authorized', description: 'Actor' } },
+test('agent packet needs no permission declaration and still rejects secret fields, unknown modes and unsupported durations', () => {
+  assert.equal(parseAgentBrief({ ...example, subject: { kind: 'authorized', description: 'Actor' } }).subject.permission, undefined);
+  for (const invalid of [{ ...example, apiKey: 'dummy' },
     { ...example, audio: { mode: 'guaranteed-lipsync' } }, { ...example, scenes: [{ duration: 45, action: 'Action', camera: 'Still' }] }]) {
     assert.throws(() => parseAgentBrief(invalid), AgentError);
   }
@@ -44,18 +57,29 @@ test('reviews follow actual distinct image bytes and do not count product refere
     assert.match(compileAgentBrief(brief).blockers.join(' '), /Duplicate image/);
     brief.references.pop(); brief.references[0].usage = 'product'; brief.location.minimumReferences = 1;
     assert.match(compileAgentBrief(brief).blockers.join(' '), /at least 1/);
-    brief.references[0].usage = 'location'; brief.references[0].review.viewpointMatch = false;
-    assert.match(compileAgentBrief(brief).blockers.join(' '), /camera viewpoint/);
+    brief.references[0].usage = 'location'; brief.references[0].review!.viewpointMatch = false;
+    assert.match(compileAgentBrief(brief).warnings.join(' '), /camera viewpoint/);
+    assert.equal(compileAgentBrief(brief).status, 'ready');
+    brief.references[0].review!.usable = false;
+    assert.equal(compileAgentBrief(brief).status, 'ready');
     fs.writeFileSync(path.join(ASSET_DIR, ids[0] + '.jpg'), 'changed');
     assert.match(compileAgentBrief(brief).blockers.join(' '), /changed after/);
+    brief.references[0] = { assetId: ids[0], usage: 'location', role: 'Background' };
+    const withoutDeclarations = parseAgentBrief(brief);
+    assert.equal(compileAgentBrief(withoutDeclarations).status, 'ready');
+    assert.equal(withoutDeclarations.references[0].review, undefined);
   } finally { for (const id of ids) { fs.unlinkSync(path.join(ASSET_DIR, id + '.jpg')); fs.unlinkSync(path.join(ASSET_DIR, id + '.json')); } }
 });
-test('agent authority checks accept Next internal hostname with actual loopback Host; job IDs and billable authorization are stable', () => {
+test('local access and job IDs stay stable; generation needs no approval and validates optional budget', () => {
   assert.equal(assertAgentRequest(new Request('http://localhost:3000', { headers: { Host: '127.0.0.1:3000', 'X-Video-Agent': 'studio-v1' } }), true), 'http://127.0.0.1:3000');
   assert.throws(() => assertAgentRequest(new Request('http://127.0.0.1:3000'), true));
   const a = agentJobId('a'.repeat(64)); assert.equal(a, agentJobId('a'.repeat(64))); assert.notEqual(a, agentJobId('b'.repeat(64)));
   assert.match(a, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-a[a-f0-9]{3}-[a-f0-9]{12}$/);
-  for (const auth of [null, {}, { authorized: true, maximumUsd: NaN, humanRequest: 'Generate' }, { authorized: true, maximumUsd: 2, humanRequest: '' }]) assert.throws(() => parseAgentAuthorization(auth), AgentError);
+  assert.deepEqual(parseAgentGenerationOptions(), {});
+  assert.deepEqual(parseAgentGenerationOptions({}), {});
+  assert.deepEqual(parseAgentGenerationOptions({ authorized: false }), {});
+  assert.deepEqual(parseAgentGenerationOptions({ maximumUsd: 2 }), { maximumUsd: 2 });
+  for (const options of [null, [], { apiKey: 'dummy' }, { maximumUsd: NaN }, { maximumUsd: 0 }, { humanRequest: '' }]) assert.throws(() => parseAgentGenerationOptions(options), AgentError);
 });
 test('multilingual text keeps its script and never claims universal documented language support', () => {
   for (const [language, text] of [['Arabic','مرحبا بالعالم'], ['Japanese','こんにちは世界'], ['Lithuanian','Sveikas, pasauli.']]) {

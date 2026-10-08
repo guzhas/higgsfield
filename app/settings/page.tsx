@@ -13,6 +13,7 @@ export default function SettingsPage() {
   const [maxConcurrent, setMaxConcurrent] = useState(4);
   const [spendCap, setSpendCap] = useState("");
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [stats, setStats] = useState<{ diskBytes: number; outputs: number; allTime: { usd: number } } | null>(null);
 
   useEffect(() => {
@@ -32,11 +33,13 @@ export default function SettingsPage() {
   }, []);
 
   async function save() {
-    await fetch("/api/settings", {
+    const response = await fetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ keyId, keySecret, maxConcurrent, spendCap }),
     });
+    if (!response.ok) { const data = await response.json().catch(()=>({})); setSaveError(data.error ?? 'Could not save settings.'); setSaved(false); return; }
+    setSaveError('');
     if (keySecret.trim()) {
       setHasSecret(true);
       setSource("database");
@@ -55,8 +58,8 @@ export default function SettingsPage() {
       <div className="mx-auto max-w-2xl space-y-7 px-6 py-7">
         <section className="space-y-2 rounded-xl border border-edge-soft bg-panel p-5">
           <h2 className="text-base font-semibold">OpenRouter</h2>
-          <p className="text-sm text-muted">{openRouterConfigured ? "API key loaded from the server environment." : "Add OPENROUTER_API_KEY to .env.local and restart the server."}</p>
-          <p className="text-xs text-faint">Choose OpenRouter on the Video page for Seedance 2.5 or Kling 3.0 Standard / Pro. Estimates exclude platform fees and taxes; completed jobs record the API usage cost. Image uploads also need a Higgsfield key.</p>
+          <p className="text-sm text-muted">{openRouterConfigured ? "API key loaded from the server environment." : "Add OPENROUTER_API_KEY to .env and restart the server."}</p>
+          <p className="text-xs text-faint">Seedance 2.5 sources and results stay in this project's local storage. Image and audio references are sent with the generation request; no Higgsfield storage key is needed in local inline mode. Estimates exclude platform fees and taxes; completed jobs record the API usage cost.</p>
         </section>
         <section className="space-y-4 rounded-xl border border-edge-soft bg-panel p-5">
           <div>
@@ -168,6 +171,7 @@ export default function SettingsPage() {
           </button>
           {saved && <span className="text-sm text-accent">Saved</span>}
         </div>
+        {saveError && <p role="alert" className="text-sm text-muted">{saveError}</p>}
       </div>
     </div>
   );

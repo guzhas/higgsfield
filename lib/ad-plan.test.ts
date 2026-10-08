@@ -3,6 +3,17 @@ import { test } from 'node:test';
 import { adDuration, buildAdPrompt, generationDuration, newAdPlan, planFromVoiceover, planIssues, sceneTimeline } from './ad-plan';
 import { VOICEOVER_CAPABILITIES } from './voiceover-contract';
 
+test('ad editor retains outdoor microphone direction and blocks incompatible known source audio',()=>{
+  const plan=newAdPlan();plan.product='Meditation invitation';plan.audioMode='generated';
+  plan.scenes.forEach(s=>{s.visual='A presenter on a beach.';s.narration='Sveiki.';});
+  plan.acoustics={space:'open_air',microphone:'phone_camera',distanceMeters:2,referenceContent:'speech_only',ambienceMode:'generate_from_scene',referenceAcoustics:'unknown',soundscape:'Small waves.'};
+  const prompt=buildAdPrompt(plan);assert.match(prompt,/phone microphone approximately 2 m/);
+  assert.ok(!prompt.includes('appropriate room tone'));
+  assert.match(prompt,/Generate speech and environment together/);
+  plan.acoustics.referenceAcoustics='roomy';assert.match(planIssues(plan).join(' '),/kambario aidas/);
+  assert.throws(()=>buildAdPrompt(plan),/kambario aidas/);
+});
+
 test('ad timeline is contiguous and prompts separate original voiceover from generated speech and captions', () => {
   const plan = newAdPlan(); plan.product = 'Blue packaging, white logo.';
   plan.scenes.forEach((s, i) => { s.visual = `Product action ${i}.`; s.narration = `Exact words ${i}.`; s.caption = 'Only in editing'; });

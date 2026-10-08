@@ -1,4 +1,5 @@
 import type { AdPlan } from './ad-plan';
+import type { SceneAcoustics } from './scene-audio';
 
 export interface AgentBrief {
   schemaVersion: 1;
@@ -7,11 +8,11 @@ export interface AgentBrief {
   subject: { kind: 'fictional' | 'authorized'; description: string; permission?: string };
   location: { name: string; viewpoint: string; minimumReferences: number };
   dialogue: { text: string; language: string; delivery: string };
-  audio: { mode: 'native' | 'reference' | 'original' | 'silent'; voiceoverImportId?: string; referenceAssetId?: string; soundscape?: string };
+  audio: { mode: 'native' | 'reference' | 'original' | 'silent'; voiceoverImportId?: string; referenceAssetId?: string; soundscape?: string; acoustics?: SceneAcoustics };
   scenes: { duration: number; action: string; camera: string; caption?: string }[];
   finishing?: string;
-  references: { assetId: string; sourceUrl?: string; provenance?: string; rights: string; role: string; usage: 'location' | 'subject' | 'product' | 'style';
-    review: { sha256: string; method: 'vision'; reviewer: string; locationMatch: boolean; viewpointMatch: boolean; usable: boolean; observations: string } }[];
+  references: { assetId: string; sourceUrl?: string; provenance?: string; rights?: string; role: string; usage: 'location' | 'subject' | 'product' | 'style';
+    review?: { sha256: string; method: 'vision'; reviewer: string; locationMatch: boolean; viewpointMatch: boolean; usable: boolean; observations: string } }[];
 }
 export interface AgentPackage {
   schemaVersion: 1;
@@ -25,5 +26,5 @@ export interface AgentPackage {
   adPlan: AdPlan;
   compositionUrl: string;
   generationStarted: false;
-  capabilities: { referenceAudio: 'experimental'; exactLipSync: false; vision: 'external-agent-attestation' };
+  capabilities: { referenceAudio: 'experimental'; exactLipSync: false; vision: 'optional-external-agent-review' };
 }

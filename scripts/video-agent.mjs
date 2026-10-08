@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-const base = 'http://127.0.0.1:3000', voiceBase = 'http://127.0.0.1:3210';
+const base = (process.env.VIDEO_AGENT_BASE_URL?.trim() || 'http://127.0.0.1:3000').replace(/\/$/, ''), voiceBase = 'http://127.0.0.1:3210';
 const [command, ...args] = process.argv.slice(2);
 const id = value => { if (!/^[a-f0-9]{64}$/.test(value ?? '')) throw new Error('Expected a 64-character plan/import ID.'); return value; };
 const assetId = value => { if (!/^[0-9a-f-]{36}$/i.test(value ?? '')) throw new Error('Expected an asset/job UUID.'); return value; };
@@ -17,6 +17,8 @@ async function json(url, body, extraHeaders = {}) {
 }
 function output(data) { process.stdout.write(JSON.stringify(data, null, 2) + '\n'); }
 try {
+  const studioUrl = new URL(base);
+  if (studioUrl.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(studioUrl.hostname) || studioUrl.username || studioUrl.password || studioUrl.pathname !== '/' || studioUrl.search || studioUrl.hash) throw new Error('VIDEO_AGENT_BASE_URL must be a loopback HTTP origin, for example http://127.0.0.1:3001.');
   if (command === 'capabilities') output(await json(base + '/api/agent/capabilities'));
   else if (command === 'prepare') {
     const result = await json(base + '/api/agent/plans', fileJson(args[0]));
@@ -27,8 +29,8 @@ try {
     const target = path.resolve(args[1]); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, JSON.stringify(pkg, null, 2));
     output({ id: pkg.id, status: pkg.status, saved: target, blockers: pkg.blockers });
   } else if (command === 'submit') {
-    const authorization = fileJson(args[1]);
-    output(await json(base + `/api/agent/plans/${id(args[0])}/generate`, authorization));
+    const options = args[1] ? fileJson(args[1]) : {};
+    output(await json(base + `/api/agent/plans/${id(args[0])}/generate`, options));
   } else if (command === 'status') output(await json(base + '/api/jobs/' + assetId(args[0])));
   else if (command === 'voices') {
     const type = args[0] ?? 'replicated'; if (!['replicated','prebuilt'].includes(type)) throw new Error('Choose replicated or prebuilt.');
@@ -55,6 +57,6 @@ try {
     const form = new FormData(); form.set('file', new Blob([data], { type: mime }), 'reference');
     if (command === 'upload-local') form.set('localOnly', '1'); else form.set('validateReferences', '1');
     const result = await (await http(base + '/api/upload', { method: 'POST', body: form })).json();
-    output({ assetId: result.assetId, kind: result.kind, localUrl: result.localUrl, duration: result.duration, width: result.width, height: result.height, published: Boolean(result.url) });
-  } else throw new Error('Commands: capabilities | prepare brief.json | inspect planId output.json | submit planId authorization.json (billable) | status jobId | voices [replicated|prebuilt] | speech request.json output.wav (billable) | import-voice audio.wav manifest.json | upload-local file mime | publish assetId (external upload).');
+    output({ assetId: result.assetId, kind: result.kind, localUrl: result.localUrl, duration: result.duration, width: result.width, height: result.height, published: Boolean(result.url?.startsWith('https://')), localInline: Boolean(result.url?.startsWith('studio-asset:')) });
+  } else throw new Error('Commands: capabilities | prepare brief.json | inspect planId output.json | submit planId [options.json] (billable) | status jobId | voices [replicated|prebuilt] | speech request.json output.wav (billable) | import-voice audio.wav manifest.json | upload-local file mime | publish assetId (external upload).');
 } catch (e) { process.stderr.write((e instanceof Error ? e.message : 'Agent command failed.') + '\n'); process.exitCode = 1; }

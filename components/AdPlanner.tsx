@@ -186,7 +186,7 @@ export default function AdPlanner() {
         {agentPackage.warnings?.map((warning, i) => <p key={i} className="mb-2 text-xs text-warn">{warning}</p>)}
         <details className="mb-3"><summary className="cursor-pointer text-sm">Review compiled prompt and reference evidence</summary>
           <pre className="my-3 max-h-80 overflow-auto whitespace-pre-wrap text-xs">{agentPackage.prompt}</pre>
-          {agentPackage.brief.references.map(r => <div key={r.assetId} className="my-3 flex gap-3 text-xs"><img alt={r.role} src={`/api/reference-assets/${r.assetId}`} className="h-20 w-28 rounded object-contain" /><p>{r.role}<br />{r.review.observations}<br />{r.sourceUrl ? <a className="text-accent" href={r.sourceUrl} target="_blank" rel="noreferrer">Source</a> : r.provenance} · {r.rights}</p></div>)}
+          {agentPackage.brief.references.map(r => <div key={r.assetId} className="my-3 flex gap-3 text-xs"><img alt={r.role} src={`/api/reference-assets/${r.assetId}`} className="h-20 w-28 rounded object-contain" /><p>{r.role}<br />{r.review?.observations}<br />{r.sourceUrl ? <a className="text-accent" href={r.sourceUrl} target="_blank" rel="noreferrer">Source</a> : r.provenance}{r.rights && ` · ${r.rights}`}</p></div>)}
         </details>
         <button className={button} disabled={!agentPackage.generationRequest} onClick={() => openComposer({ kind: 'video', ...agentPackage.generationRequest } as ComposerDraft)}>Review this video in Studio</button>
         <button className={`${button} ml-2`} onClick={() => { setPlan(agentPackage.adPlan); setAgentPackage(null); setNotice('Agent timeline loaded for editing. Use the compiled package in Studio for its original video brief.'); }}>Use timeline for local editing</button>

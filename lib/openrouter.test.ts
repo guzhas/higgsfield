@@ -4,6 +4,11 @@ import { buildOpenRouterBody, calculateVideoPrice, describeOpenRouterRejection, 
 import { parseGenerationRequest } from "./payload";
 import { defaultParams, getModel } from "./models";
 import { HiggsfieldError } from "./higgsfield";
+import fs from 'node:fs';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { ASSET_DIR, saveAsset } from './reference-assets';
+import { localAssetUrl } from './reference-transport';
 
 const originalFetch = globalThis.fetch;
 const originalKey = process.env.OPENROUTER_API_KEY;
@@ -44,6 +49,55 @@ test("references become ordered frame_images, while normal parameters are preser
   assert.equal(body.first_frame_url, undefined);
   assert.deepEqual((body.frame_images as { frame_type: string }[]).map((f) => f.frame_type), ["first_frame", "last_frame"]);
   assert.throws(() => buildOpenRouterBody(endpoint, { ...input, first_frame_url: "file:///private" }));
+});
+
+test('fixed frames cannot silently override cloned audio',()=>{
+  const audio={type:'audio_url',audio_url:{url:'https://example.com/cloned-dialogue.wav'}};
+  assert.throws(()=>buildOpenRouterBody(endpoint,{...input,first_frame_url:'https://example.com/frame.png',input_references:[audio]}),/take priority/);
+  assert.throws(()=>buildOpenRouterBody(endpoint,{...input,first_frame_url:'https://example.com/frame.png',input_references:[{type:'image_url',image_url:{url:'https://example.com/other.png'}}]}),/take priority/);
+});
+
+test('first-frame plus audio parsing binds uploaded assets and blocks ratio or reference substitutions',()=>{
+  const frameId=randomUUID(),audioId=randomUUID();
+  fs.mkdirSync(ASSET_DIR,{recursive:true});
+  const frame={assetId:frameId,filename:`${frameId}.png`,mime:'image/png',kind:'image' as const,url:'https://example.com/frame.png',localUrl:`/api/reference-assets/${frameId}`,width:720,height:1280,bytes:1};
+  const audio={assetId:audioId,filename:`${audioId}.wav`,mime:'audio/wav',kind:'audio' as const,url:'https://example.com/voice.wav',localUrl:`/api/reference-assets/${audioId}`,duration:20,bytes:1};
+  const files=[path.join(ASSET_DIR,frame.filename),path.join(ASSET_DIR,audio.filename),path.join(ASSET_DIR,`${frameId}.json`),path.join(ASSET_DIR,`${audioId}.json`)];
+  try {
+    fs.writeFileSync(files[0],Buffer.from([0]));fs.writeFileSync(files[1],Buffer.from([0]));saveAsset(frame);saveAsset(audio);
+    const request={modelId:endpoint,prompt:'Use the fixed frame and approved voice.',params:{...input,aspect_ratio:'9:16',generate_audio:true},references:[audio],referenceMode:'references',firstFrame:frame};
+    const parsed=parseGenerationRequest(request);
+    assert.throws(()=>buildOpenRouterBody(parsed.endpoint,parsed.body),/take priority/);
+    assert.throws(()=>parseGenerationRequest({...request,params:{...request.params,aspect_ratio:'16:9'}}),/ratio/);
+    assert.throws(()=>parseGenerationRequest({...request,firstFrame:{...frame,url:'https://example.com/changed.png'}}),/no longer matches/);
+    assert.throws(()=>parseGenerationRequest({...request,references:[frame]}),/audio only/);
+    assert.throws(()=>parseGenerationRequest({...request,firstFrame:audio}),/first-frame image/);
+  } finally { for(const file of files)fs.unlinkSync(file); }
+});
+
+test('local images and cloned speech are encoded only for the outgoing request, with tamper protection',()=>{
+  const frameId=randomUUID(),audioId=randomUUID();
+  fs.mkdirSync(ASSET_DIR,{recursive:true});
+  const frameBytes=Buffer.from('test frame bytes'),audioBytes=Buffer.from('test speech bytes');
+  const frame={assetId:frameId,filename:`${frameId}.png`,mime:'image/png',kind:'image' as const,url:localAssetUrl(frameId),localUrl:`/api/reference-assets/${frameId}`,width:720,height:1280,bytes:frameBytes.length};
+  const audio={assetId:audioId,filename:`${audioId}.wav`,mime:'audio/wav',kind:'audio' as const,url:localAssetUrl(audioId),localUrl:`/api/reference-assets/${audioId}`,duration:20,bytes:audioBytes.length};
+  const files=[path.join(ASSET_DIR,frame.filename),path.join(ASSET_DIR,audio.filename),path.join(ASSET_DIR,`${frameId}.json`),path.join(ASSET_DIR,`${audioId}.json`)];
+  try {
+    fs.writeFileSync(files[0],frameBytes);fs.writeFileSync(files[1],audioBytes);saveAsset(frame);saveAsset(audio);
+    const request={modelId:endpoint,prompt:'Use the complete scene reference and approved voice.',params:{...input,aspect_ratio:'9:16',generate_audio:true},references:[frame,audio],referenceMode:'references'};
+    const parsed=parseGenerationRequest(request);
+    assert.ok(!JSON.stringify(parsed.body).includes(';base64,'));
+    const outgoing=buildOpenRouterBody(parsed.endpoint,parsed.body);
+    assert.deepEqual(outgoing.input_references,[{type:'image_url',image_url:{url:`data:image/png;base64,${frameBytes.toString('base64')}`}},{type:'audio_url',audio_url:{url:`data:audio/wav;base64,${audioBytes.toString('base64')}`}}]);
+    assert.equal(outgoing.frame_images,undefined);
+    assert.ok(!JSON.stringify(outgoing).includes('studio-asset:'));
+    assert.equal(outgoing._studio_inline_assets,undefined);
+    const legacy=parseGenerationRequest({modelId:endpoint,prompt:'Use local first frame.',params:request.params,refUrls:[frame.url]});
+    assert.deepEqual(buildOpenRouterBody(legacy.endpoint,legacy.body).frame_images,[{type:'image_url',image_url:{url:`data:image/png;base64,${frameBytes.toString('base64')}`},frame_type:'first_frame'}]);
+    fs.writeFileSync(files[1],Buffer.from('changed speech'));
+    assert.throws(()=>buildOpenRouterBody(parsed.endpoint,parsed.body),/changed after preparation/);
+    assert.throws(()=>parseGenerationRequest({...request,references:[{...audio,assetId:frameId}]}),/no longer matches/);
+  } finally { for(const file of files)fs.unlinkSync(file); }
 });
 
 test("catalog validation blocks unsupported settings before any billable POST", async () => {
@@ -106,6 +160,7 @@ test("upstream error payloads are not exposed and ambiguous errors are not autom
 test("validation diagnostics classify errors without exposing credentials, asset URLs or raw metadata", () => {
   const privateMessage = 'test-private-key https://private.example/asset.png';
   const cases: [unknown, number, RegExp][] = [
+    [{ error: { message: 'Invalid reference URL: input_references[1].audio_url.url: Only HTTPS URLs are allowed' } }, 400, /requires an HTTPS audio reference URL/],
     [{ error: { message: 'Real human faces are not supported. ' + privateMessage } }, 400, /portrait\/face asset restriction/],
     [{ error: { metadata: { raw: JSON.stringify({ error: { message: 'Failed to download reference image ' + privateMessage } }) } } }, 400, /could not access a reference/],
     [{ error: { message: 'input_references not supported ' + privateMessage } }, 422, /unsupported reference mode/],

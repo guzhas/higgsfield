@@ -1,6 +1,7 @@
 import { buildBody, getModel, resolveEndpoint, type ModelDef } from "./models";
 import { referenceInputs, validateReferences, withReferenceRoles, type VideoReference, type ReferenceMode } from './video-references';
 import { readAsset } from './reference-assets';
+import { bindInlineAssets, isLocalAssetUrl } from './reference-transport';
 
 /**
  * Shared parsing for /api/generate and /api/estimate — both take the same shape
@@ -88,6 +89,40 @@ export function parseGenerationRequest(input: unknown): GenerationRequest {
       body._studio_references = references;
       body._studio_reference_mode = mode;
     } catch (error) { throw new BadRequest(error instanceof Error ? error.message : 'Invalid references.'); }
+  }
+
+  if (raw.firstFrame !== undefined) {
+    try {
+      if (model.id !== 'openrouter:bytedance/seedance-2.5' || raw.referenceMode !== 'references' || !Array.isArray(raw.references) || refUrls.length) throw new Error('Fixed first-frame plus audio is available only through the Seedance 2.5 reference workflow.');
+      const frame = raw.firstFrame as VideoReference;
+      if (!frame || frame.kind !== 'image' || !frame.assetId) throw new Error('Upload the fixed first-frame image before preparing it.');
+      const asset = readAsset(frame.assetId);
+      if (asset.kind !== 'image' || asset.url !== frame.url) throw new Error('The first frame no longer matches its uploaded asset.');
+      if ((raw.references as VideoReference[]).some(r => r.kind !== 'audio')) throw new Error('A fixed first frame can be combined with audio only; do not mix other image or video references.');
+      validateReferences([{...asset}], 'frames');
+      const [w,h] = String(body.aspect_ratio).split(':').map(Number);
+      if (!asset.width || !asset.height || Math.abs(asset.width/asset.height-w/h)>0.03) throw new Error('Choose an output ratio matching the first frame.');
+      body.first_frame_url = asset.url;
+      body._studio_first_frame = asset;
+    } catch (error) { throw new BadRequest(error instanceof Error ? error.message : 'Invalid first frame.'); }
+  }
+
+  const inlineRefs = [...(Array.isArray(body._studio_references) ? body._studio_references as VideoReference[] : []),...(body._studio_first_frame ? [body._studio_first_frame as VideoReference] : [])];
+  for (const key of ['first_frame_url','last_frame_url']) {
+    const url = body[key];
+    if (typeof url === 'string' && isLocalAssetUrl(url) && !inlineRefs.some(r=>r.url===url)) {
+      const frame = readAsset(url.slice('studio-asset:'.length));
+      if (frame.kind !== 'image' || frame.url !== url) throw new BadRequest('The frame no longer matches its local image asset.');
+      validateReferences([frame],'frames');
+      const [w,h] = String(body.aspect_ratio).split(':').map(Number);
+      if (!frame.width || !frame.height || Math.abs(frame.width/frame.height-w/h)>0.03) throw new BadRequest('Choose an output ratio matching the first frame.');
+      inlineRefs.push(frame);
+    }
+  }
+  if (inlineRefs.some(r => isLocalAssetUrl(r.url))) {
+    if (model.id !== 'openrouter:bytedance/seedance-2.5') throw new BadRequest('Local inline references are implemented for OpenRouter Seedance 2.5 only.');
+    try { body._studio_inline_assets = bindInlineAssets(inlineRefs); }
+    catch (error) { throw new BadRequest((error as Error).message); }
   }
 
   return { model, endpoint, body, prompt, batch, refUrls };

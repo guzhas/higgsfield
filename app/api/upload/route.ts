@@ -6,6 +6,7 @@ import { ASSET_DIR, saveAsset, publicAsset, type ReferenceAsset } from '@/lib/re
 import { inspectMedia, runMediaTool } from '@/lib/media-tools';
 import { validateReferences } from '@/lib/video-references';
 import { assertAgentRequest } from '@/lib/agent-plans';
+import { localInlineReferences, localAssetUrl } from '@/lib/reference-transport';
 
 export const runtime = 'nodejs';
 export const maxDuration = 180;
@@ -27,7 +28,8 @@ export async function POST(req: Request) {
   const created: string[] = [];
   try {
     const form = await req.formData(); const file = form.get('file');
-    const localOnly = form.get('localOnly') === '1';
+    const inline = localInlineReferences();
+    const localOnly = form.get('localOnly') === '1' || inline;
     const normalizeReference = form.get('normalizeReference') === '1';
     if (normalizeReference) assertAgentRequest(req, true);
     if (!(file instanceof File)) return Response.json({ error: 'Choose a file.' }, { status: 400 });
@@ -68,6 +70,7 @@ export async function POST(req: Request) {
     const asset: ReferenceAsset = { assetId: id, url: '', localUrl: `/api/reference-assets/${id}`, filename, mime, kind, name: file.name.slice(0,120), bytes: fs.statSync(target).size, ...info };
     if (!localOnly && form.get('validateReferences') === '1') validateReferences([{ ...asset, url: 'https://upload.example/asset' }], 'references');
     if (!localOnly) asset.url = await uploadFile(Uint8Array.from(fs.readFileSync(target)).buffer, mime);
+    if (inline) asset.url=localAssetUrl(asset.assetId);
     saveAsset(asset);
     return Response.json(publicAsset(asset));
   } catch (error) {

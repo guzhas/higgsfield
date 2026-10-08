@@ -6,7 +6,8 @@ export async function GET(req: Request) {
     voiceover: '/api/voiceover-import', documentation: '.agents/skills/video-agent/SKILL.md',
     limits: { durationSeconds: [4,30], resolution: ['480p','720p'], images: 30, assets: 50 },
     referenceAudio: { documented: true, liveVerified: false }, exactLipSync: false,
-    vision: 'External agent reviews the pixels; the server binds that attestation to image hashes. No server-side vision model.',
-    voiceManagement: 'Use Voiceovers; enrollment requires the speaker’s real consent recording.', generationStarted: false }, { headers: { 'Cache-Control': 'no-store' } }); }
+    vision: 'External image reviews are optional; supplied reviews remain bound to image hashes. No server-side vision model.',
+    confirmationsRequired: false,
+    voiceManagement: 'ElevenLabs IVC accepts uploaded voice samples. Provider verification metadata does not block local selection; the provider request determines availability.', generationStarted: false }, { headers: { 'Cache-Control': 'no-store' } }); }
   catch { return Response.json({ error: 'Agent access is local-only.' }, { status: 403 }); }
 }

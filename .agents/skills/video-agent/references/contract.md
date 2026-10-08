@@ -1,8 +1,25 @@
 # Agent execution contract
 
+All project sources, recordings, results, exports, plans and evidence stay in the local `storage` directory. Do not publish them to Higgsfield or any cloud storage, and do not create tunnels, temporary hosting or public HTTPS media endpoints. Never request cloud-storage credentials as a workaround. Authorized provider API calls may send local bytes inline; HTTPS API communication is not media hosting. If inline media is unsupported, report the provider limitation and preserve local files instead of changing storage or audio mode.
+
+Observed 2026-10-08: OpenRouter Seedance rejected inline audio with HTTP 400: `input_references[1].audio_url.url: Only HTTPS URLs are allowed`. No upstream video job was created. Do not repeat that incompatible route or claim transport acceptance from local tests.
+
+Exception for the current meditation video: on 2026-10-08 the owner offered their existing Higgsfield storage key if necessary. Once supplied, Director input `referenceTransport: "higgsfield"` may upload only the selected image and finished dialogue copies for OpenRouter reference access. Keep original assets and outputs local. This is per order; do not change the project default or create tunnels, and do not request a BytePlus registration. Credentials alone do not select external storage for other orders.
+
 Run the CLI from the repository root. It talks only to fixed local HTTP endpoints; credentials remain in the corresponding servers. It never loads `.env.local`. The marker `X-Video-Agent: studio-v1` and same-origin checks protect browser access; they are not authentication against local processes. Bind the studio to 127.0.0.1; do not expose these routes on LAN or hosting without an authentication layer.
 
 ## Commands
+
+For scene-matched audio, the v1 brief accepts optional `audio.acoustics`:
+`space` (`open_air`/`interior`), `microphone` (`phone_camera`/`close_mic`),
+`distanceMeters` (0.1–15), `referenceContent` (`speech_only`/`mixed`),
+`ambienceMode` (`generate_from_scene`/`preserve_reference`/`none`),
+`referenceAcoustics` (`unknown`/`dry`/`roomy`) and optional `soundscape`.
+These compile into prompt direction, not provider JSON parameters. Mixed
+references must preserve their existing ambience; native generation cannot
+preserve absent reference audio. Known room-like speech cannot be used for an
+open-air request. `dry` is a listening assessment, never inferred from an
+isolation/normalization success. See the dated scene-acoustics research.
 
 ```text
 npm run agent -- capabilities
@@ -14,11 +31,12 @@ npm run agent -- speech storage/agent-work/order/speech.json storage/agent-work/
 npm run agent -- import-voice storage/agent-work/order/dialogue.wav storage/agent-work/order/voice-manifest.json
 npm run agent -- prepare storage/agent-work/order/brief.json
 npm run agent -- inspect <plan-id> storage/agent-work/order/package.json
-npm run agent -- submit <plan-id> storage/agent-work/order/authorization.json
+npm run agent -- submit <plan-id>
+npm run agent -- submit <plan-id> storage/agent-work/order/options.json
 npm run agent -- status <job-UUID>
 ```
 
-`speech` and `submit` are billable and never automatically repeated. `publish` sends a copy to provider-accessible cloud storage. `upload-local`, `import-voice`, `prepare`, `inspect` and local status reads make no generation request. The human's request to generate can authorize routine uploads/TTS/one video request within that scope; planning-only requests do not. Never infer authorization from these examples.
+`speech` and `submit` are billable and never automatically repeated. In this local workflow, `publish` only registers a local asset marker; cloud publication is forbidden. `upload-local`, `import-voice`, `prepare`, `inspect` and local status reads make no generation request. The human's request to generate can authorize routine uploads/TTS/one video request within that scope; planning-only requests do not. Never infer authorization from these examples.
 
 The HTTP voice service is the sibling Voiceovers browser app at 127.0.0.1:3210. Desktop-only usage does not provide this API. Use its `Kurti video` button instead when appropriate. Do not send desktop enrollment samples/consent to the video server. TTS request example: `{ "text": "Exact approved dialogue.", "voice": "Puck", "style": "ugc", "direction": "Natural and calm delivery." }`; confirm supported style IDs and voice availability in the current sibling project.
 The current browser speech fragment limit is260characters, not260words. A `speech` command produces one fragment; the agent must split longer text sensibly, combine completed fragments locally and create a full-text manifest before video import. Keep one profile/style and actual audio boundaries across fragments. The command does not promise word alignment, clone enrollment or an automatically running Voiceovers server.
@@ -31,22 +49,22 @@ Use `docs/agent-brief.example.json` as a complete no-reference structural exampl
 
 - `request`: original intent and output style; max12000 characters.
 - `format`: aspectRatio 9:16,16:9 or1:1; resolution480p or720p.
-- `subject`: kind fictional or authorized, description; authorized requires a human-grounded permission description. This declaration is not verified consent or permission to impersonate someone.
+- `subject`: kind fictional or authorized, description; `permission` is optional descriptive metadata, never a required approval declaration.
 - `location`: name, viewpoint and required distinct-image count0–30. Use0 for an invented setting if no location evidence is needed. Respect a requested count; do not force three photos for every video.
 - `dialogue`: exact text (empty for silent or non-speaking native soundscapes), language, delivery direction. Reference mode requires a verified spoken transcript; music-only references use Studio.
-- `audio`: native/reference/original/silent, optional `soundscape` for generated ambience/music/effects. Original/silent modes require separate local sound editing for extra sound design. Reference/original requires `voiceoverImportId`; reference also needs the published copy ID in `referenceAssetId` unless the original asset is already public. The published audio bytes must match the local approved WAV exactly.
+- `audio`: native/reference/original/silent, optional `soundscape` for generated ambience/music/effects. Original/silent modes require separate local sound editing for extra sound design. Reference/original requires `voiceoverImportId`; reference uses the approved local asset ID in `referenceAssetId`. Its bound bytes must match the local approved WAV exactly; submit only to a provider accepting inline audio.
 - `scenes`:1–10 records containing duration, action, camera and optional `caption` for deterministic local editing. Each scene1–30s; total4–30s. Fractional edit timings are allowed. Dialogue is global, so reference-audio generation uses the full timeline in one request. Optional top-level `finishing` conveys visual treatment; unsupported demands remain model-dependent rather than guaranteed.
-- `references`: up to30 reviewed uploaded images with `assetId`, a genuine HTTPS `sourceUrl` for web images or truthful `provenance` for user-provided/generated images, `rights`, `role`<=300characters, `usage` location/subject/product/style, and `review`. Do not put local paths, keys or enrollment files into the brief. For a user-owned file, use provenance to describe its actual source; no invented URL is needed.
+- `references`: up to30 uploaded images with `assetId`, `role`<=300characters and `usage` location/subject/product/style. `sourceUrl`, `provenance`, `rights` and `review` are optional evidence, not confirmation requirements. Do not put local paths, keys or enrollment files into the brief. When recording provenance, use the actual source; do not invent a URL or review.
 
-For each image, `review` contains `{sha256,method:"vision",reviewer,locationMatch,viewpointMatch,usable,observations}`. Obtain sha256 from the stored image bytes under `storage/references/<UUID>.<extension>`; do not guess. `observations` must describe visible evidence and any excluded parts. Source titles alone are insufficient. For subject/product/style references, locationMatch/viewpointMatch may be false; those assets do not count toward location minimums. The server checks identity, bytes, limits and attestations; the external agent must actually inspect the pixels and establish provenance. Identical image hashes cannot inflate the reference count.
+When an image has an optional `review`, it contains `{sha256,method:"vision",reviewer,locationMatch,viewpointMatch,usable,observations}`. Obtain sha256 from the actual stored bytes; do not guess or describe an uninspected image as reviewed. The server checks supplied review hashes for integrity. Suitability observations are warnings, not approval gates. Subject/product/style assets do not count toward location minimums; identical image hashes cannot inflate the reference count.
 
 ## Package and job
 
-POST `/api/agent/plans` with the brief returns a content-addressed package with id, status, blockers, warnings, prompt, generationRequest, adPlan, compositionUrl and generationStarted:false. GET `/api/agent/plans/<id>` recomputes file checks; modifying a file invalidates its review. Every public reference is checked through the same typed generation parser as Studio. `ready` does not imply language quality, faithful geography, ownership or successful lip sync. Read warnings before proceeding.
+POST `/api/agent/plans` with the brief returns a content-addressed package with id, status, blockers, warnings, prompt, generationRequest, adPlan, compositionUrl and generationStarted:false. GET `/api/agent/plans/<id>` recomputes file checks; modifying a file invalidates its review. Every bound local reference is checked through the same typed generation parser as Studio. `ready` does not imply language quality, faithful geography, ownership or successful lip sync. Read warnings before proceeding.
 
 The agent-generated prompt is genre-neutral. Use `compositionUrl` for preview and `Review this video in Studio` for manual submission. Editing that prompt in Studio creates a separate generic generation workflow; the agent endpoint only submits the immutable package and handles deduplication. “Use timeline for local editing” copies its scene layout into the advertisement editor, without overwriting the current plan before the click.
 
-POST `/api/agent/plans/<id>/generate` needs the client marker and `{ "authorized":true, "maximumUsd":2, "humanRequest":"The actual human instruction requesting generation." }`. Obtain a quote from POST `/api/estimate` with the package's generationRequest first; choose a justified ceiling, never a fabricated unlimited budget. maximumUsd bounds the app's estimate, not a provider-guaranteed final invoice. The existing spend cap also applies. Repeated identical plan submissions return the existing job ID, including failed jobs. A changed plan is a new chargeable attempt.
+POST `/api/agent/plans/<id>/generate` needs the client marker and no confirmation declaration. An empty body or `{}` executes the requested generation. Optional `{ "maximumUsd":2 }` bounds the estimate when a per-request budget is supplied; optional `humanRequest` records context and defaults to the plan's request. Legacy `authorized` booleans are accepted without creating a gate. Obtain and inspect the price automatically; do not ask for another approval. The configured spend cap still applies. Repeated identical plan submissions return the existing job ID, including failed jobs. A changed plan is a new chargeable attempt.
 
 GET `/api/jobs/<job-id>` returns `{job}`. Only terminal completed with actual saved video output can be called generated successfully; pending/queued/in_progress/downloading remain unfinished. Failed/nsfw/canceled must be reported. Download/play local `/api/media/...` output from job.outputs; do not expose provider credentials. Completed output URLs do not prove correct speech or lip movement: perform the quality review in workflow.md. OpenRouter cancellation is unavailable; don't claim to cancel it by merely stopping polling.
 

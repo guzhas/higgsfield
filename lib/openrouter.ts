@@ -1,6 +1,7 @@
 import { OPENROUTER_PREFIX } from "./openrouter-models";
 import { HiggsfieldError, type Estimate, type StatusResponse, type SubmitResponse } from "./higgsfield";
 import fs from 'node:fs';
+import { inlineAssetUrl, isLocalAssetUrl, type InlineAssetBinding } from './reference-transport';
 
 const BASE = "https://openrouter.ai/api/v1";
 export const isOpenRouter = (endpoint: string) => endpoint.startsWith(OPENROUTER_PREFIX);
@@ -8,7 +9,7 @@ export const hasOpenRouterCredentials = () => Boolean(process.env.OPENROUTER_API
 
 function headers(): Record<string, string> {
   const key = process.env.OPENROUTER_API_KEY?.trim();
-  if (!key) throw new HiggsfieldError("Set OPENROUTER_API_KEY in .env.local and restart the server.", 401);
+  if (!key) throw new HiggsfieldError("Set OPENROUTER_API_KEY in .env and restart the server.", 401);
   return { Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
 }
 
@@ -20,6 +21,7 @@ export function openRouterErrorDetails(payload: unknown, secrets: string[] = [])
   function clean(text: string): string {
     for (const secret of secrets.filter(Boolean)) text = text.split(secret).join('[REDACTED]');
     return text.replace(/sk-[A-Za-z0-9_-]+/g, '[REDACTED]')
+      .replace(/data:(?:image|audio)\/[^;\s]+;base64,[A-Za-z0-9+/=]+/g, '[INLINE_MEDIA]')
       .replace(/Bearer\s+[^\s"<>]+/gi, 'Bearer [REDACTED]')
       .replace(/https?:\/\/[^\s"<>]+/gi, '[URL]')
       .replace(/\b[A-Za-z0-9_+\/-]{40,}(?:={0,2})\b/g, '[REDACTED]').slice(0, 1000);
@@ -67,6 +69,7 @@ export function describeOpenRouterRejection(payload: unknown, status: number): s
   }
   collect(payload);
   const hint = hints.join(' ').toLowerCase();
+  if (/only https urls are allowed/.test(hint) && /audio_url/.test(hint)) return 'OpenRouter requires an HTTPS audio reference URL and rejected local-inline audio. Files can remain local, but this transport cannot start a talking-video job.';
   if (/inputimagesensitivecontentdetected\.privacyinformation/.test(hint) ||
       (/input image/.test(hint) && /may contain real person/.test(hint))) {
     return 'OpenRouter\'s provider rejected a reference image because it may contain a real person (InputImageSensitiveContentDetected.PrivacyInformation). A provider-supported portrait asset workflow is required.';
@@ -143,13 +146,22 @@ export async function videoModels(): Promise<VideoModel[]> {
 export function buildOpenRouterBody(endpoint: string, input: Record<string, unknown>): Record<string, unknown> {
   const { first_frame_url, last_frame_url, ...raw } = input;
   const body = Object.fromEntries(Object.entries(raw).filter(([key]) => !key.startsWith('_studio_')));
-  if (Array.isArray(body.input_references) && body.input_references.length && (first_frame_url || last_frame_url)) throw new HiggsfieldError('Choose references or first/last frames, not both.', 400);
+  const bindings = Array.isArray(input._studio_inline_assets) ? input._studio_inline_assets as InlineAssetBinding[] : [];
+  if (Array.isArray(body.input_references) && body.input_references.length && (first_frame_url || last_frame_url)) {
+    throw new HiggsfieldError('Fixed frames take priority over all references, including audio. Use image and audio references together without fixed frames to preserve cloned-speech guidance.', 400);
+  }
   const frames = [first_frame_url, last_frame_url].flatMap((url, i) => {
     if (!url) return [];
-    if (typeof url !== "string" || !url.startsWith("https://")) throw new HiggsfieldError("Reference images need a public HTTPS URL.", 400);
-    return [{ type: "image_url", image_url: { url }, frame_type: i === 0 ? "first_frame" : "last_frame" }];
+    if (typeof url !== "string" || !(url.startsWith("https://") || isLocalAssetUrl(url))) throw new HiggsfieldError("Reference images need an uploaded local asset or a public HTTPS URL.", 400);
+    return [{ type: "image_url", image_url: { url: inlineAssetUrl(url,'image',bindings) }, frame_type: i === 0 ? "first_frame" : "last_frame" }];
   });
-  return { ...body, model: endpoint.slice(OPENROUTER_PREFIX.length), ...(frames.length ? { frame_images: frames } : {}) };
+  if (Array.isArray(body.input_references)) body.input_references = body.input_references.map(r => {
+    const kind = String(r.type).replace(/_url$/,''), key = `${kind}_url`, value = r[key];
+    return value?.url ? {...r,[key]:{...value,url:inlineAssetUrl(value.url,kind,bindings)}} : r;
+  });
+  const result = { ...body, model: endpoint.slice(OPENROUTER_PREFIX.length), ...(frames.length ? { frame_images: frames } : {}) };
+  if (Buffer.byteLength(JSON.stringify(result)) > 64*1024*1024) throw new HiggsfieldError('Inline generation request exceeds 64 MiB.',400);
+  return result;
 }
 
 async function validate(endpoint: string, input: Record<string, unknown>): Promise<VideoModel> {
